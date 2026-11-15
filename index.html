@@ -1,0 +1,55 @@
+<!doctype html><html lang="pt-BR"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ControlChip — Autorização de acesso</title>
+<style>body{font:16px system-ui,-apple-system,sans-serif;background:#f3f5f8;color:#1a2634;margin:0;padding:40px 16px}.panel{max-width:570px;margin:2rem auto;background:#fff;border-radius:14px;padding:32px;box-shadow:0 8px 30px #14243a19}h1{font-size:1.45rem}p{line-height:1.5}input{box-sizing:border-box;padding:12px;width:100%;border:1px solid #aaa;border-radius:8px;font:inherit}button{padding:12px 20px;border-radius:8px;font:inherit;border:1px solid #165ca6;cursor:pointer;background:#165ca6;color:#fff}button:disabled{opacity:.6}button.deny{background:white;color:#165ca6}button+button{margin-left:8px}small{color:#526170}.hide{display:none}.err{color:#a22121;white-space:pre-wrap;word-break:break-word}.item{padding:8px 0;overflow-wrap:anywhere}</style>
+</head><body><main class="panel">
+<h1>ControlChip — Autorização de acesso</h1>
+<p>Esta tela permite autorizar um cliente de IA a acessar os recursos permitidos da ControlChip. Leia os dados antes de aprovar.</p>
+<p id="status">Verificando autenticação...</p>
+<section id="login" class="hide"><label for="email">E-mail de acesso</label><input id="email" type="email" autocomplete="email" placeholder="voce@empresa.com"><p><button id="send">Enviar link seguro de acesso</button></p><small>O login exige confirmação pelo titular do e-mail. Nenhuma autorização é automática.</small></section>
+<section id="consent" class="hide">
+<div class="item"><strong>Aplicativo:</strong> <span id="client"></span></div>
+<div class="item"><strong>Destino:</strong> <span id="redirect"></span></div>
+<div class="item"><strong>Permissões solicitadas:</strong> <span id="scopes"></span></div>
+<p><button id="approve">Autorizar</button><button class="deny" id="deny">Negar acesso</button></p>
+</section>
+<p role="alert" class="err" id="error"></p>
+</main>
+<script type="module">
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.86.0";
+const base="https://zitnjiggrrglcozhmcze.supabase.co";
+const apikey="sb_publishable_3CmMpuogR5wd49JrchkTFQ_yjpTPyxY";
+const db=createClient(base,apikey,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true,flowType:"pkce"}});
+const $=id=>document.getElementById(id);const status=$("status"),error=$("error");
+const id=new URLSearchParams(location.search).get("authorization_id");
+const show=(element,b)=>element.classList.toggle("hide",!b);
+function fail(e){status.textContent="Não foi possível continuar.";error.textContent=typeof e==="string"?e:(e?.message||"Falha de autorização");}
+async function init(){
+if(!id||id.length>200){fail("Link de autorização inválido.");return}
+const {data:{user},error:ue}=await db.auth.getUser();
+if(ue||!user){status.textContent="Entre com seu e-mail para continuar.";show($("login"),true);return}
+const {data,error:de}=await db.auth.oauth.getAuthorizationDetails(id);
+if(de){fail(de);return}
+if(!data){fail("Autorização não encontrada ou expirada.");return}
+if(!("authorization_id" in data)){if(data.redirect_url){location.assign(data.redirect_url);return}fail("Dados de autorização incompletos.");return}
+$("client").textContent=data.client?.name||"Cliente não identificado";
+$("redirect").textContent=data.redirect_uri||"(não informado)";
+$("scopes").textContent=data.scope||"(sem escopos informados)";
+status.textContent="Confirme que reconhece o aplicativo e o destino.";show($("consent"),true)
+}
+$("send").addEventListener("click",async()=>{
+const email=$("email").value.trim();if(!email||email.length>254){fail("Informe um e-mail válido.");return}
+$("send").disabled=true;error.textContent="";const {error:e}=await db.auth.signInWithOtp({email,options:{emailRedirectTo:location.href,shouldCreateUser:true}});
+$("send").disabled=false;if(e){fail(e);return}status.textContent="Verifique seu e-mail e abra o link de confirmação.";show($("login"),false);
+});
+async function decide(accept){
+$("approve").disabled=$("deny").disabled=true;
+const {data,error:e}=accept?await db.auth.oauth.approveAuthorization(id):await db.auth.oauth.denyAuthorization(id);
+if(e){$("approve").disabled=$("deny").disabled=false;fail(e);return}
+if(!data?.redirect_url){fail("Resposta de autorização incompleta.");return}
+location.assign(data.redirect_url);
+}
+$("approve").addEventListener("click",()=>decide(true));
+$("deny").addEventListener("click",()=>decide(false));
+init().catch(fail);
+</script></body></html>
